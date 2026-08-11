@@ -1,44 +1,30 @@
-from flask import Flask, request, make_response, redirect, abort
+from datetime import datetime
+from flask import Flask, render_template, request
+from flask_moment import Moment
 
 app = Flask(__name__)
+moment = Moment(app)
 
-# 1. Rota Principal / Home
 @app.route('/')
 def index():
-    return '<h1>Hello World!</h1><h2>Disciplina PTBDSWS</h2>'
+    return render_template('index.html', current_time=datetime.utcnow())
 
-# 2. Rota com Parâmetro Dinâmico (Nome do Usuário)
-@app.route('/user/<name>')
-def user(name):
-    return f'<h1>Hello, {name}!</h1>'
+@app.route('/identificacao/<nome>/<prontuario>/<instituicao>')
+def identificacao(nome, prontuario, instituicao):
+    return render_template('identificacao.html', nome=nome, prontuario=prontuario, instituicao=instituicao)
 
-# 3. Rota de Contexto da Requisição (Navegador do Usuário)
 @app.route('/contextorequisicao')
 def contexto_requisicao():
-    user_agent = request.headers.get('User-Agent')
-    return f'<p>Your browser is {user_agent}</p>'
-
-# 4. Rota com Código de Status HTTP Diferente (400 Bad Request)
-@app.route('/codigostatusdiferente')
-def codigo_status_diferente():
-    return '<h1>Bad request</h1>', 400
-
-# 5. Rota usando Objeto Resposta (make_response com Cookie)
-@app.route('/objetoresposta')
-def objeto_resposta():
-    response = make_response('<h1>This document carries a cookie!</h1>')
-    response.set_cookie('answer', '42')
-    return response
-
-# 6. Rota de Redirecionamento (Redireciona para o IFSP Pirituba)
-@app.route('/redirecionamento')
-def redirecionamento():
-    return redirect('https://ptb.ifsp.edu.br/')
-
-# 7. Rota de Abortar (Erro 404 simulado)
-@app.route('/abortar')
-def abortar():
-    abort(404)
+    nome = "Leonardo Macêdo Aurieni"
+    user_agent = request.user_agent.string
+    
+    # Pega o IP correto sem quebrar no PythonAnywhere
+    ip_remoto = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if ip_remoto and ',' in ip_remoto:
+        ip_remoto = ip_remoto.split(',')[0]
+        
+    host = request.host
+    return render_template('contexto.html', nome=nome, user_agent=user_agent, ip_remoto=ip_remoto, host=host)
 
 if __name__ == '__main__':
     app.run()
