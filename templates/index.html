@@ -1,22 +1,65 @@
 {% extends "base.html" %}
 
 {% block content %}
+
 <div class="page-header">
-    <h1>Hello, {% if name %}{{ name }}{% else %}Stranger{% endif %}!</h1>
-    {% if not known %}
-        <p>Pleased to meet you!</p>
-    {% else %}
-        <p>Happy to see you again!</p>
+    <h1>
+        Hello,
+        {% if name %}
+            {{ name }}
+        {% else %}
+            Stranger
+        {% endif %}!
+    </h1>
+
+    {% if name %}
+        {% if not known %}
+            <p>Pleased to meet you!</p>
+        {% else %}
+            <p>Happy to see you again!</p>
+        {% endif %}
     {% endif %}
 </div>
+
 <hr>
 
 <form method="POST">
     {{ form.hidden_tag() }}
+
     <div class="form-group">
         {{ form.name.label(class="font-weight-bold") }}
-        {{ form.name(class="form-control") }}
+        {{ form.name(class="form-control", placeholder="Digite seu nome") }}
     </div>
+
     {{ form.submit(class="btn btn-light border") }}
 </form>
+
+<hr class="mt-5">
+
+<h2 class="mb-4">Relação de usuários cadastrados</h2>
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>Nome do usuário</th>
+            <th>Função</th>
+        </tr>
+    </thead>
+
+    <tbody>
+        {% for usuario in usuarios %}
+        <tr>
+            <td>{{ usuario.username }}</td>
+            <td>
+                {% if usuario.role %}
+                    {{ usuario.role.name }}
+                {% else %}
+                    Sem função
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
 {% endblock %}
