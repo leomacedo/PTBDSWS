@@ -1,0 +1,49 @@
+<div class="mt-4">
+    <h2>Relação de usuários cadastrados</h2>
+    <p>Quantidade: {{ total_usuarios }}</p>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Nome do usuário</th>
+                <th>Função</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for usuario in usuarios %}
+            <tr>
+                <td>{{ usuario.username }}</td>
+                <td>{{ usuario.role.name }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="mt-4">
+    <h2>Relação de funções cadastradas</h2>
+    <p>Quantidade: {{ total_funcoes }}</p>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Funções</th>
+                <th>Usuários</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for funcao in funcoes %}
+            <tr>
+                <td>{{ funcao.nome }}</td>
+                <td>
+                    <ol class="mb-0">
+                        {% for usuario in funcao.usuarios %}
+                        <li>{{ usuario.username }}</li>
+                        {% endfor %}
+                    </ol>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
