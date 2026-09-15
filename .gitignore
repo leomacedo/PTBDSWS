@@ -1,1 +1,2 @@
-__pycache__/hello.cpython-314.pyc
+__pycache__/
+*.pyc
