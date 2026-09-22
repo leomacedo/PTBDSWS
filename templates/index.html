@@ -1,6 +1,29 @@
+
 {% extends "base.html" %}
 
 {% block content %}
-{% include "cadastro.html" %}
-{% include "relacao.html" %}
+<div class="page-header">
+    <h1>Olá, {% if name %}{{ name }}{% else %}Stranger{% endif %}!</h1>
+
+    {% if name %}
+        {% if known %}
+            <p>Feliz em vê-lo novamente!</p>
+        {% else %}
+            <p>Prazer em conhecê-lo!</p>
+        {% endif %}
+    {% endif %}
+</div>
+
+<hr>
+
+<form method="POST">
+    {{ form.hidden_tag() }}
+
+    <div class="form-group">
+        {{ form.name.label(class="font-weight-bold") }}
+        {{ form.name(class="form-control", placeholder="Digite seu nome") }}
+    </div>
+
+    {{ form.submit(class="btn btn-light border") }}
+</form>
 {% endblock %}
