@@ -64,8 +64,9 @@ def enviar_email(usuario):
     if not all([url, chave, remetente, admin]):
         raise RuntimeError('Configuração do Mailgun incompleta no .env')
 
-    #destinatarios = [admin, 'flaskaulasweb@zohomail.com']
-    destinatarios = [admin]
+    # aguardando confirmação do email do professor
+    destinatarios = [admin, 'flaskaulasweb@zohomail.com']
+
     mensagem = (
         'Novo usuário cadastrado no Flasky.\n\n'
         'Prontuário: PT3035867\n'
