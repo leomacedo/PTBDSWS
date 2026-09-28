@@ -6,7 +6,7 @@ from flask import Flask, render_template, session, redirect, url_for, flash
 from flask_wtf import FlaskForm
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from wtforms import StringField, SubmitField
+from wtforms import StringField, BooleanField, SubmitField
 from wtforms.validators import DataRequired
 
 # Configurações
@@ -47,15 +47,27 @@ class User(db.Model):
 
 # Formulário
 class NameForm(FlaskForm):
-    name = StringField('Qual o seu nome?', validators=[DataRequired()])
+    name = StringField('Qual é o seu nome?', validators=[DataRequired()])
+    enviar_professor = BooleanField('Deseja enviar e-mail também para flaskaulasweb@zohomail.com?')
     submit = SubmitField('Enviar')
 
 @app.shell_context_processor
 def make_shell_context():
     return dict(db=db, User=User, Role=Role)
 
+# Cadastro das funções
+def obter_funcao(nome):
+    funcao = Role.query.filter_by(name=nome).first()
+
+    if funcao is None:
+        funcao = Role(name=nome)
+        db.session.add(funcao)
+        db.session.flush()
+
+    return funcao
+
 # Envio de e-mail pelo Mailgun
-def enviar_email(usuario):
+def enviar_email(usuario, enviar_professor=False):
     url = app.config['API_URL']
     chave = app.config['API_KEY']
     remetente = app.config['API_FROM']
@@ -64,60 +76,81 @@ def enviar_email(usuario):
     if not all([url, chave, remetente, admin]):
         raise RuntimeError('Configuração do Mailgun incompleta no .env')
 
-    # aguardando confirmação do email do professor
-    destinatarios = [admin, 'flaskaulasweb@zohomail.com']
+    destinatarios = [admin]
+
+    if enviar_professor:
+        destinatarios.append('flaskaulasweb@zohomail.com')
 
     mensagem = (
-        'Novo usuário cadastrado no Flasky.\n\n'
+        'Novo usuário cadastrado no Flask.\n\n'
         'Prontuário: PT3035867\n'
         'Nome do aluno: Leonardo Macedo Aurieni\n'
-        f'Usuário cadastrado: {usuario.username}'
+        f'Usuário cadastrado: {usuario.username}\n'
+        f'Função: {usuario.role.name}'
     )
 
     resposta = requests.post(
         url,
         auth=('api', chave),
-        data={'from': remetente, 'to': destinatarios, 'subject': '[Flasky] Novo usuário cadastrado', 'text': mensagem},
+        data={'from': remetente, 'to': destinatarios, 'subject': '[Flask] Novo usuário cadastrado', 'text': mensagem},
         timeout=15
     )
+
     if not resposta.ok:
         app.logger.error('Mailgun HTTP %s: %s', resposta.status_code, resposta.text)
         resposta.raise_for_status()
+
     return resposta.json()
 
-# Cadastro de usuários
+# Página principal
 @app.route('/', methods=['GET', 'POST'])
 def index():
     form = NameForm()
 
     if form.validate_on_submit():
         nome = form.name.data.strip()
-        user = User.query.filter_by(username=nome).first()
 
-        if user is None and nome:
-            user = User(username=nome)
-            db.session.add(user)
-            db.session.commit()
-            session['known'] = False
-
-            try:
-                enviar_email(user)
-                flash('Novo usuário cadastrado! E-mail aceito pelo Mailgun.', 'success')
-            except (requests.RequestException, RuntimeError, ValueError):
-                app.logger.exception('Falha ao enviar e-mail de novo usuário')
-                flash('Usuário cadastrado, mas não foi possível confirmar o envio do e-mail.', 'warning')
-
-        elif user is not None:
-            session['known'] = True
-
-        else:
+        if not nome:
             flash('Digite um nome válido.', 'warning')
             return redirect(url_for('index'))
 
+        usuario = User.query.filter_by(username=nome).first()
         session['name'] = nome
+
+        if usuario is None:
+            nome_funcao = 'Administrador' if User.query.count() == 0 else 'Usuário'
+            funcao = obter_funcao(nome_funcao)
+
+            usuario = User(username=nome, role=funcao)
+            db.session.add(usuario)
+            db.session.commit()
+
+            session['known'] = False
+
+            try:
+                enviar_email(usuario, form.enviar_professor.data)
+                session['email_enviado'] = True
+                flash('Novo usuário cadastrado! E-mail aceito pelo Mailgun.', 'success')
+            except (requests.RequestException, RuntimeError, ValueError):
+                session['email_enviado'] = False
+                app.logger.exception('Falha ao enviar e-mail de novo usuário')
+                flash('Usuário cadastrado, mas não foi possível confirmar o envio do e-mail.', 'warning')
+        else:
+            session['known'] = True
+            session['email_enviado'] = False
+
         return redirect(url_for('index'))
 
-    return render_template('index.html', form=form, name=session.get('name'), known=session.get('known', False))
+    usuarios = User.query.order_by(User.id.asc()).all()
+
+    return render_template(
+        'index.html',
+        form=form,
+        name=session.get('name'),
+        known=session.get('known', False),
+        email_enviado=session.pop('email_enviado', False),
+        usuarios=usuarios
+    )
 
 if __name__ == '__main__':
     app.run(debug=True)
