@@ -1,6 +1,6 @@
-
 import os
 import requests
+from datetime import datetime
 from dotenv import load_dotenv
 from flask import Flask, render_template, session, redirect, url_for, flash
 from flask_wtf import FlaskForm
@@ -45,6 +45,18 @@ class User(db.Model):
     def __repr__(self):
         return f'<User {self.username}>'
 
+class EmailEnviado(db.Model):
+    __tablename__ = 'emails_enviados'
+    id = db.Column(db.Integer, primary_key=True)
+    usuario = db.Column(db.String(64), nullable=False)
+    destinatarios = db.Column(db.String(255), nullable=False)
+    assunto = db.Column(db.String(255), nullable=False)
+    texto = db.Column(db.Text, nullable=False)
+    data_hora = db.Column(db.DateTime, nullable=False)
+
+    def __repr__(self):
+        return f'<EmailEnviado {self.usuario}>'
+
 # Formulário
 class NameForm(FlaskForm):
     name = StringField('Qual é o seu nome?', validators=[DataRequired()])
@@ -53,9 +65,9 @@ class NameForm(FlaskForm):
 
 @app.shell_context_processor
 def make_shell_context():
-    return dict(db=db, User=User, Role=Role)
+    return dict(db=db, User=User, Role=Role, EmailEnviado=EmailEnviado)
 
-# Cadastro das funções
+# Funções
 def obter_funcao(nome):
     funcao = Role.query.filter_by(name=nome).first()
 
@@ -66,7 +78,6 @@ def obter_funcao(nome):
 
     return funcao
 
-# Envio de e-mail pelo Mailgun
 def enviar_email(usuario, enviar_professor=False):
     url = app.config['API_URL']
     chave = app.config['API_KEY']
@@ -81,18 +92,13 @@ def enviar_email(usuario, enviar_professor=False):
     if enviar_professor:
         destinatarios.append('flaskaulasweb@zohomail.com')
 
-    mensagem = (
-        'Novo usuário cadastrado no Flask.\n\n'
-        'Prontuário: PT3035867\n'
-        'Nome do aluno: Leonardo Macedo Aurieni\n'
-        f'Usuário cadastrado: {usuario.username}\n'
-        f'Função: {usuario.role.name}'
-    )
+    assunto = '[Flask] Novo usuário'
+    texto = f'Novo usuário cadastrado: {usuario.username}'
 
     resposta = requests.post(
         url,
         auth=('api', chave),
-        data={'from': remetente, 'to': destinatarios, 'subject': '[Flask] Novo usuário cadastrado', 'text': mensagem},
+        data={'from': remetente, 'to': destinatarios, 'subject': assunto, 'text': texto},
         timeout=15
     )
 
@@ -100,9 +106,20 @@ def enviar_email(usuario, enviar_professor=False):
         app.logger.error('Mailgun HTTP %s: %s', resposta.status_code, resposta.text)
         resposta.raise_for_status()
 
+    email = EmailEnviado(
+        usuario=usuario.username,
+        destinatarios=', '.join(destinatarios),
+        assunto=assunto,
+        texto=texto,
+        data_hora=datetime.now()
+    )
+
+    db.session.add(email)
+    db.session.commit()
+
     return resposta.json()
 
-# Página principal
+# Home
 @app.route('/', methods=['GET', 'POST'])
 def index():
     form = NameForm()
@@ -151,6 +168,12 @@ def index():
         email_enviado=session.pop('email_enviado', False),
         usuarios=usuarios
     )
+
+# Relação de e-mails enviados
+@app.route('/emails')
+def emails():
+    emails_enviados = EmailEnviado.query.order_by(EmailEnviado.id.desc()).all()
+    return render_template('emails.html', emails=emails_enviados)
 
 if __name__ == '__main__':
     app.run(debug=True)

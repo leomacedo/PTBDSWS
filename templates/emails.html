@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="mt-4">
+    <h1>E-mails enviados</h1>
+
+    <p>Relação de e-mails enviados para o administrador do sistema, notificando o cadastro de novos usuários.</p>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>De</th>
+                <th>Para</th>
+                <th>Assunto</th>
+                <th>Texto</th>
+                <th>Data/Hora</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for email in emails %}
+            <tr>
+                <td>{{ email.usuario }}</td>
+                <td>
+                    {% for destinatario in email.destinatarios.split(', ') %}
+                        {{ destinatario }}{% if not loop.last %},<br>{% endif %}
+                    {% endfor %}
+                </td>
+                <td>{{ email.assunto }}</td>
+                <td>{{ email.texto }}</td>
+                <td>
+                    {{ email.data_hora.strftime('%d/%m/%Y') }}<br>
+                    {{ email.data_hora.strftime('%H:%M:%S') }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

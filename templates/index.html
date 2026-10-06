@@ -1,4 +1,3 @@
-
 {% extends "base.html" %}
 
 {% block content %}
@@ -27,7 +26,7 @@
 
     <div class="form-group">
         {{ form.name.label(class="font-weight-bold") }}
-        {{ form.name(class="form-control", placeholder="Digite seu nome") }}
+        {{ form.name(class="form-control") }}
     </div>
 
     <div class="form-group form-check">
@@ -48,6 +47,7 @@
                 <th>Função</th>
             </tr>
         </thead>
+
         <tbody>
             {% for usuario in usuarios %}
             <tr>
