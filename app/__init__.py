@@ -3,6 +3,12 @@ from flask_bootstrap import Bootstrap
 from flask_mail import Mail
 from flask_moment import Moment
 from flask_sqlalchemy import SQLAlchemy
+
+import os
+from dotenv import load_dotenv
+
+basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+load_dotenv(os.path.join(basedir, '.env'))
 from config import config
 
 bootstrap = Bootstrap()
