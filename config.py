@@ -17,7 +17,6 @@ class Config:
     FLASKY_MAIL_SUBJECT_PREFIX = '[Flasky]'
     FLASKY_MAIL_SENDER = 'flaskaulas@zohomail.com'
     FLASKY_ADMIN = os.environ.get('FLASKY_ADMIN')
-    PROFESSOR_EMAIL = os.environ.get('PROFESSOR_EMAIL', 'fabio.teixeira@ifsp.edu.br')
     STUDENT_PRONTUARIO = os.environ.get('STUDENT_PRONTUARIO', 'le37118890')
     STUDENT_NAME = os.environ.get('STUDENT_NAME', 'Leonardo Macedo Aurieni')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
