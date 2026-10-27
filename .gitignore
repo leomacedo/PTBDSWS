@@ -1,3 +1,9 @@
-.env
-__pycache__/
+# Ignore compiled Python files
 *.pyc
+.env
+
+# Ignore Python cache directories
+__pycache__/
+
+# Ignore virtual environment directories
+venv/
