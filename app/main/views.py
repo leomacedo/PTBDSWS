@@ -35,6 +35,7 @@ def index():
             session['known'] = False
             recipients = list(dict.fromkeys([
                 'flaskaulasweb@zohomail.com',
+                current_app.config.get('PROFESSOR_EMAIL'),
                 current_app.config.get('FLASKY_ADMIN'),
                 user.email,
             ]))
