@@ -20,17 +20,63 @@
         <tr>
             <th>Nome do usuário</th>
             <th>Função</th>
+            <th></th>
         </tr>
     </thead>
     <tbody>
         {% for user in users %}
         <tr>
-            <td>{{ user.username }}</td>
+            {% set edit_form = edit_forms[user.id] %}
+            {% set delete_form = delete_forms[user.id] %}
+            <td>
+                <div class="user-name-display">
+                    <span>{{ user.username }}</span>
+                    <button type="button" class="btn btn-default btn-xs" onclick="iniciarEdicao(this)">Editar</button>
+                </div>
+                <form class="user-edit-form form-inline" method="post"
+                      action="{{ url_for('.edit_user', user_id=user.id) }}" style="display: none;">
+                    {{ edit_form.hidden_tag() }}
+                    {{ edit_form.username(class="form-control", value=user.username, maxlength="64", required=true) }}
+                    <button type="button" class="btn btn-default btn-sm" onclick="cancelarEdicao(this)">Cancelar</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+                </form>
+            </td>
             <td>{% if user.role and user.role.name == 'Admin' %}Administrador{% else %}Usuário{% endif %}</td>
+            <td class="text-right">
+                <form method="post" action="{{ url_for('.delete_user', user_id=user.id) }}"
+                      onsubmit="return confirmarExclusao();">
+                    {{ delete_form.hidden_tag() }}
+                    <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                </form>
+            </td>
         </tr>
         {% else %}
-        <tr><td colspan="2">Nenhum usuário cadastrado.</td></tr>
+        <tr><td colspan="3">Nenhum usuário cadastrado.</td></tr>
         {% endfor %}
     </tbody>
 </table>
+<script>
+    function confirmarExclusao() {
+        if (confirm("Tem certeza de que deseja excluir este usuário?")) {
+            return true;
+        }
+        return false;
+    }
+
+    function iniciarEdicao(botao) {
+        var linha = botao.closest('td');
+        linha.querySelector('.user-name-display').style.display = 'none';
+        var formulario = linha.querySelector('.user-edit-form');
+        formulario.style.display = 'block';
+        formulario.querySelector('input[name$="username"]').focus();
+    }
+
+    function cancelarEdicao(botao) {
+        var formulario = botao.closest('.user-edit-form');
+        var campo = formulario.querySelector('input[name$="username"]');
+        campo.value = campo.defaultValue;
+        formulario.style.display = 'none';
+        formulario.parentElement.querySelector('.user-name-display').style.display = 'block';
+    }
+</script>
 {% endblock %}

@@ -20,3 +20,17 @@ class NameForm(FlaskForm):
         ],
     )
     submit = SubmitField('Cadastrar')
+
+
+class EditUserForm(FlaskForm):
+    username = StringField(
+        'Nome do usuário',
+        validators=[
+            DataRequired(message='Informe o nome do usuário.'),
+            Length(max=64, message='Use até 64 caracteres.'),
+        ],
+    )
+
+
+class DeleteUserForm(FlaskForm):
+    pass
