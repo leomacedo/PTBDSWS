@@ -1,147 +1,143 @@
-import re
 import unittest
-from html import unescape
 from unittest.mock import patch
 
 from app import create_app, db
-from app.models import Role, User
+from app.models import User
+from app.email import send_password_reset_email
 
 
-class UserManagementTestCase(unittest.TestCase):
+class AuthenticationTestCase(unittest.TestCase):
     def setUp(self):
         self.app = create_app('testing')
-        self.app.config['TESTING'] = True
+        self.app.config.update(TESTING=True, WTF_CSRF_ENABLED=False,
+                               SERVER_NAME='aula090.example',
+                               API_URL='https://mail.example/messages',
+                               API_KEY='test-key', API_FROM='test@example.com')
         self.client = self.app.test_client()
         self.app_context = self.app.app_context()
         self.app_context.push()
         db.create_all()
-
-        self.admin_role = Role(name='Admin')
-        self.user_role = Role(name='User')
-        db.session.add_all([self.admin_role, self.user_role])
-        db.session.flush()
-        self.admin = User(username='admin', role=self.admin_role)
-        self.user = User(username='usuario', role=self.user_role)
-        db.session.add_all([self.admin, self.user])
-        db.session.commit()
 
     def tearDown(self):
         db.session.remove()
         db.drop_all()
         self.app_context.pop()
 
-    def csrf_token(self, field_name):
-        response = self.client.get('/')
-        self.assertEqual(response.status_code, 200)
-        match = re.search(
-            rf'name="{re.escape(field_name)}"[^>]*value="([^"]+)"',
-            response.get_data(as_text=True),
-        )
-        self.assertIsNotNone(match, f'Campo CSRF {field_name} não foi renderizado')
-        return match.group(1)
+    def create_user(self, email='pessoa@example.com', username='pessoa', confirmed=False):
+        user = User(email=email, username=username, confirmed=confirmed)
+        user.set_password('senha-correta-123')
+        db.session.add(user)
+        db.session.commit()
+        return user
 
-    def test_editar_usuario_persiste_sem_alterar_funcao_ou_enviar_email(self):
-        csrf = self.csrf_token(f'edit-{self.user.id}-csrf_token')
-        with patch('app.main.views.send_simple_message') as send_email:
-            response = self.client.post(
-                f'/usuarios/{self.user.id}/editar',
-                data={f'edit-{self.user.id}-csrf_token': csrf,
-                      f'edit-{self.user.id}-username': 'nome_atualizado'},
-                follow_redirects=True,
-            )
+    def login(self, email='pessoa@example.com', password='senha-correta-123'):
+        return self.client.post('/login', data={'email': email, 'password': password},
+                                follow_redirects=True)
 
+    def test_cadastro_guarda_hash_e_oferece_confirmacao_direta(self):
+        response = self.client.post('/cadastro', data={
+            'email': ' NOVA@example.com ', 'username': 'nova',
+            'password': 'senha-nova-123', 'password2': 'senha-nova-123',
+        }, follow_redirects=True)
+        user = User.query.filter_by(username='nova').one()
         self.assertEqual(response.status_code, 200)
-        self.assertIn('Nome do usuário atualizado com sucesso.'.encode(), response.data)
+        self.assertIn('Cadastro realizado!', response.get_data(as_text=True))
+        self.assertIn('Clique aqui', response.get_data(as_text=True))
+        self.assertEqual(user.email, 'nova@example.com')
+        self.assertTrue(user.password_hash != 'senha-nova-123')
+        self.assertTrue(user.check_password('senha-nova-123'))
+        self.assertFalse(user.confirmed)
+
+    def test_login_email_persistencia_e_acesso_condicional_a_relacao(self):
+        user = self.create_user(confirmed=False)
+        logged_out = self.client.get('/')
+        self.assertIn('Olá, Desconhecido!', logged_out.get_data(as_text=True))
+        self.assertNotIn('Relação de usuários cadastrados', logged_out.get_data(as_text=True))
+        response = self.login()
+        self.assertIn('Olá, pessoa!', response.get_data(as_text=True))
+        self.assertNotIn('Relação de usuários cadastrados', response.get_data(as_text=True))
+        self.assertIn('Seu e-mail ainda não foi confirmado.', response.get_data(as_text=True))
+        self.assertIn('Você não pode ver a relação de usuários por conta disso.', response.get_data(as_text=True))
+        self.client.get(f'/confirmar/{user.generate_confirmation_token()}')
+        confirmed_page = self.client.get('/').get_data(as_text=True)
+        self.assertIn('Relação de usuários cadastrados', confirmed_page)
+        self.assertIn('pessoa@example.com', confirmed_page)
+        self.assertIn('Sim', confirmed_page)
+
+    def test_login_recusa_senha_incorreta(self):
+        self.create_user()
+        response = self.login(password='incorreta')
+        self.assertIn('E-mail ou senha inválidos.', response.get_data(as_text=True))
+        self.assertIn('Entrar', response.get_data(as_text=True))
+
+    def test_login_exibe_manter_conectado(self):
+        page = self.client.get('/login').get_data(as_text=True)
+        self.assertIn('Manter conectado', page)
+        self.assertIn('name="remember_me"', page)
+
+    def test_alterar_senha_valida_atualiza_hash(self):
+        user = self.create_user(confirmed=True)
+        self.login()
+        response = self.client.post('/alterar-senha', data={
+            'old_password': 'senha-correta-123', 'password': 'senha-nova-456',
+            'password2': 'senha-nova-456',
+        }, follow_redirects=True)
+        db.session.refresh(user)
+        self.assertIn('Senha alterada com sucesso.', response.get_data(as_text=True))
+        self.assertTrue(user.check_password('senha-nova-456'))
+
+    def test_alterar_email_exige_senha_e_remove_confirmacao(self):
+        user = self.create_user(confirmed=True)
+        stale_confirmation = user.generate_confirmation_token()
+        self.login()
+        response = self.client.post('/alterar-email', data={
+            'email': 'novo@example.com', 'password': 'senha-correta-123',
+        }, follow_redirects=True)
+        db.session.refresh(user)
+        self.assertIn('confirmar o novo endereço', response.get_data(as_text=True))
+        self.assertEqual(user.email, 'novo@example.com')
+        self.assertFalse(user.confirmed)
+        self.assertIsNone(User.confirm_token(stale_confirmation))
+        self.assertIsNotNone(User.confirm_token(user.generate_confirmation_token()))
+
+    def test_recuperacao_envia_email_com_token_e_redefine_senha(self):
+        user = self.create_user()
+        with patch('app.main.views.send_password_reset_email') as send_email:
+            response = self.client.post('/recuperar-senha', data={'email': user.email},
+                                        follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        send_email.assert_called_once_with(user)
+        with patch('app.main.views.send_password_reset_email') as send_email:
+            self.client.post('/recuperar-senha', data={'email': 'naoexiste@example.com'})
         send_email.assert_not_called()
-        db.session.expire_all()
-        self.assertEqual(db.session.get(User, self.user.id).username, 'nome_atualizado')
-        self.assertEqual(db.session.get(User, self.user.id).role.name, 'User')
-        self.assertEqual(db.session.get(User, self.admin.id).role.name, 'Admin')
-        self.assertIn(b'nome_atualizado', self.client.get('/').data)
+        token = user.generate_reset_token()
+        response = self.client.post(f'/redefinir-senha/{token}', data={
+            'password': 'senha-recuperada-789', 'password2': 'senha-recuperada-789',
+        }, follow_redirects=True)
+        db.session.refresh(user)
+        self.assertTrue(user.check_password('senha-recuperada-789'))
+        self.assertIn('Sua senha foi redefinida.', response.get_data(as_text=True))
 
-    def test_edicao_vazia_ou_duplicada_nao_altera_usuario(self):
-        for username in ('', self.admin.username):
-            with self.subTest(username=username):
-                csrf = self.csrf_token(f'edit-{self.user.id}-csrf_token')
-                response = self.client.post(
-                    f'/usuarios/{self.user.id}/editar',
-                    data={f'edit-{self.user.id}-csrf_token': csrf,
-                          f'edit-{self.user.id}-username': username},
-                    follow_redirects=True,
-                )
-                self.assertEqual(response.status_code, 200)
-                page_text = unescape(response.get_data(as_text=True))
-                if username == '':
-                    self.assertIn('Informe o nome do usuário.', page_text)
-                else:
-                    self.assertIn('Já existe outro usuário cadastrado com esse nome.', page_text)
-                db.session.expire_all()
-                self.assertEqual(db.session.get(User, self.user.id).username, 'usuario')
+    def test_email_de_recuperacao_usa_mailgun_e_link_com_token(self):
+        user = self.create_user()
+        with patch('app.email.requests.post') as post:
+            post.return_value.raise_for_status.return_value = None
+            send_password_reset_email(user)
+        post.assert_called_once()
+        args, kwargs = post.call_args
+        self.assertEqual(args[0], 'https://mail.example/messages')
+        self.assertEqual(kwargs['auth'], ('api', 'test-key'))
+        self.assertEqual(kwargs['data']['to'], [user.email])
+        self.assertIn('/redefinir-senha/', kwargs['data']['text'])
 
-    def test_edicao_com_nome_maior_que_64_caracteres_e_rejeitada(self):
-        csrf = self.csrf_token(f'edit-{self.user.id}-csrf_token')
-        response = self.client.post(
-            f'/usuarios/{self.user.id}/editar',
-            data={f'edit-{self.user.id}-csrf_token': csrf,
-                  f'edit-{self.user.id}-username': 'x' * 65},
-            follow_redirects=True,
-        )
-        self.assertIn('Use até 64 caracteres.'.encode(), response.data)
-        db.session.expire_all()
-        self.assertEqual(db.session.get(User, self.user.id).username, 'usuario')
-
-    def test_excluir_usuario_remove_apenas_o_registro_e_nao_envia_email(self):
-        user_id = self.user.id
-        csrf = self.csrf_token(f'delete-{user_id}-csrf_token')
-        with patch('app.main.views.send_simple_message') as send_email:
-            response = self.client.post(
-                f'/usuarios/{user_id}/excluir',
-                data={f'delete-{user_id}-csrf_token': csrf},
-                follow_redirects=True,
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('Usuário "usuario" excluído com sucesso.',
-                      unescape(response.get_data(as_text=True)))
-        send_email.assert_not_called()
-        self.assertIsNone(db.session.get(User, user_id))
-        self.assertIsNotNone(db.session.get(User, self.admin.id))
-        self.assertEqual(Role.query.count(), 2)
-
-    def test_exclusao_nao_aceita_get_e_formulario_tem_csrf(self):
-        response = self.client.get(f'/usuarios/{self.user.id}/excluir')
-        self.assertEqual(response.status_code, 405)
-        page = self.client.get('/').get_data(as_text=True)
-        self.assertIn(f'name="delete-{self.user.id}-csrf_token"', page)
-        self.assertIsNotNone(db.session.get(User, self.user.id))
-
-    def test_cancelar_sem_enviar_post_nao_altera_o_banco(self):
-        # Cancelar na interface fecha a edição/confirmacao sem submeter um POST.
-        response = self.client.get('/')
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b'cancelarEdicao(this)', response.data)
-        self.assertIn(b'window.confirm' if b'window.confirm' in response.data else b'confirm(', response.data)
-        db.session.expire_all()
-        self.assertEqual(User.query.count(), 2)
-        self.assertEqual(db.session.get(User, self.user.id).username, 'usuario')
-
-    def test_cadastro_novo_usuario_continua_ativo_com_papel_e_email(self):
-        response = self.client.get('/')
-        match = re.search(rb'name="csrf_token"[^>]*value="([^"]+)"', response.data)
-        self.assertIsNotNone(match)
-        with patch('app.main.views.send_simple_message') as send_email:
-            result = self.client.post(
-                '/',
-                data={'csrf_token': match.group(1).decode(),
-                      'name': 'novo_usuario', 'email': 'novo@example.com'},
-                follow_redirects=True,
-            )
-
-        self.assertEqual(result.status_code, 200)
-        new_user = User.query.filter_by(username='novo_usuario').one()
-        self.assertEqual(new_user.role.name, 'User')
-        send_email.assert_called_once()
-        self.assertIn('novo@example.com', send_email.call_args.args[0])
+    def test_menu_conta_tem_opcoes_e_sair_desloga(self):
+        self.create_user(confirmed=True)
+        page = self.login().get_data(as_text=True)
+        self.assertIn('Alterar senha', page)
+        self.assertIn('Alterar e-mail', page)
+        self.assertIn('Sair', page)
+        response = self.client.get('/sair', follow_redirects=True)
+        self.assertIn('Olá, Desconhecido!', response.get_data(as_text=True))
 
 
 if __name__ == '__main__':

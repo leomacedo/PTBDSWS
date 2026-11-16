@@ -1,114 +1,161 @@
-from flask import render_template, session, redirect, url_for, current_app, flash
+from markupsafe import Markup
+from flask import (current_app, flash, redirect, render_template, request,
+                   url_for)
+from flask_login import current_user, login_required, login_user, logout_user
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
+
 from .. import db
-from ..models import Role, User
-from ..email import send_simple_message
+from ..email import send_password_reset_email
+from ..models import User
 from . import main
-from .forms import DeleteUserForm, EditUserForm, NameForm
-import requests
+from .forms import (ChangeEmailForm, ChangePasswordForm, LoginForm,
+                    RegistrationForm, RequestResetForm, ResetPasswordForm)
 
 
-@main.route('/', methods=['GET', 'POST'])
+@main.route('/')
 def index():
-    form = NameForm()
+    users = []
+    if current_user.is_authenticated and current_user.confirmed:
+        users = User.query.order_by(User.id).all()
+    return render_template('index.html', users=users)
+
+
+@main.route('/cadastro', methods=['GET', 'POST'])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for('.index'))
+    form = RegistrationForm()
     if form.validate_on_submit():
-        username = form.name.data.strip()
-        user = User.query.filter_by(username=username).first()
-        if user is None:
-            admin_role = Role.query.filter_by(name='Admin').first()
-            if admin_role is None:
-                admin_role = Role(name='Admin')
-                db.session.add(admin_role)
-            user_role = Role.query.filter_by(name='User').first()
-            if user_role is None:
-                user_role = Role(name='User')
-                db.session.add(user_role)
-            is_first_user = User.query.count() == 0
-            user = User(
-                username=username,
-                prontuario=current_app.config['STUDENT_PRONTUARIO'],
-                student_name=current_app.config['STUDENT_NAME'],
-                email=form.email.data.strip(),
-                role=admin_role if is_first_user else user_role,
-            )
-            db.session.add(user)
-            db.session.commit()
-            session['known'] = False
-            recipients = list(dict.fromkeys([
-                'flaskaulasweb@zohomail.com',
-                current_app.config.get('FLASKY_ADMIN'),
-                user.email,
-            ]))
-            recipients = [address for address in recipients if address]
-            try:
-                send_simple_message(
-                    recipients,
-                    'Novo usuário cadastrado',
-                    user.username,
-                    user.email,
-                    user.prontuario,
-                    user.student_name,
-                )
-                flash('Cadastro realizado e notificações enviadas por e-mail.', 'success')
-            except requests.RequestException:
-                current_app.logger.exception('Falha ao enviar a notificação de novo usuário.')
-                flash('Cadastro realizado, mas não foi possível enviar as notificações por e-mail.', 'warning')
+        email = form.email.data.strip().lower()
+        username = form.username.data.strip()
+        if User.query.filter(func.lower(User.email) == email).first():
+            flash('Este e-mail já está cadastrado.', 'warning')
+        elif User.query.filter_by(username=username).first():
+            flash('Este nome de usuário já está cadastrado.', 'warning')
         else:
-            session['known'] = True
-            flash('Este usuário já está cadastrado.', 'warning')
-        session['name'] = form.name.data
-        return redirect(url_for('.index'))
-    users = User.query.order_by(User.id).all()
-    return render_template('index.html',
-                           form=form, name=session.get('name'),
-                           known=session.get('known', False), users=users,
-                           edit_forms={user.id: EditUserForm(prefix=f'edit-{user.id}') for user in users},
-                           delete_forms={user.id: DeleteUserForm(prefix=f'delete-{user.id}') for user in users})
+            user = User(email=email, username=username)
+            user.set_password(form.password.data)
+            db.session.add(user)
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                flash('Este e-mail ou nome de usuário já está cadastrado.', 'warning')
+            else:
+                message = Markup('Cadastro realizado! <a href="{}">Clique aqui</a> para confirmar seu e-mail').format(
+                    url_for('.confirm_email', token=user.generate_confirmation_token()))
+                flash(message, 'warning')
+                return redirect(url_for('.login'))
+    return render_template('register.html', form=form)
 
 
-@main.route('/usuarios/<int:user_id>/editar', methods=['POST'])
-def edit_user(user_id):
-    user = User.query.get_or_404(user_id)
-    form = EditUserForm(prefix=f'edit-{user.id}')
-    if not form.validate_on_submit():
-        message = next(iter(form.username.errors), 'Não foi possível validar o nome do usuário.')
-        flash(message, 'danger')
-        return redirect(url_for('.index'))
+@main.route('/confirmar/<token>')
+def confirm_email(token):
+    user = User.confirm_token(token)
+    if user is None:
+        flash('O link de confirmação é inválido ou expirou.', 'danger')
+    else:
+        flash('E-mail confirmado com sucesso.', 'success')
+    return redirect(url_for('.login'))
 
-    username = form.username.data.strip()
-    if not username:
-        flash('O nome do usuário não pode ficar vazio.', 'danger')
-        return redirect(url_for('.index'))
-    if len(username) > 64:
-        flash('O nome do usuário deve ter no máximo 64 caracteres.', 'danger')
-        return redirect(url_for('.index'))
-    duplicate = User.query.filter(User.username == username, User.id != user.id).first()
-    if duplicate:
-        flash('Já existe outro usuário cadastrado com esse nome.', 'warning')
-        return redirect(url_for('.index'))
 
-    user.username = username
-    try:
-        db.session.commit()
-    except IntegrityError:
-        db.session.rollback()
-        flash('Já existe outro usuário cadastrado com esse nome.', 'warning')
+@main.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
         return redirect(url_for('.index'))
+    form = LoginForm()
+    if form.validate_on_submit():
+        email = form.email.data.strip().lower()
+        user = User.query.filter(func.lower(User.email) == email).first()
+        if user is not None and user.check_password(form.password.data):
+            login_user(user, remember=form.remember_me.data)
+            next_page = request.args.get('next')
+            if not next_page or not next_page.startswith('/') or next_page.startswith('//'):
+                next_page = url_for('.index')
+            return redirect(next_page)
+        flash('E-mail ou senha inválidos.', 'danger')
+    return render_template('login.html', form=form)
 
-    flash('Nome do usuário atualizado com sucesso.', 'success')
+
+@main.route('/sair')
+@login_required
+def logout():
+    logout_user()
+    flash('Você saiu da sua conta.', 'warning')
     return redirect(url_for('.index'))
 
 
-@main.route('/usuarios/<int:user_id>/excluir', methods=['POST'])
-def delete_user(user_id):
-    user = User.query.get_or_404(user_id)
-    form = DeleteUserForm(prefix=f'delete-{user.id}')
-    if not form.validate_on_submit():
-        flash('Não foi possível validar a solicitação. Atualize a página e tente novamente.', 'danger')
-        return redirect(url_for('.index'))
+@main.route('/alterar-senha', methods=['GET', 'POST'])
+@login_required
+def change_password():
+    form = ChangePasswordForm()
+    if form.validate_on_submit():
+        if not current_user.check_password(form.old_password.data):
+            flash('A senha atual está incorreta.', 'danger')
+        else:
+            current_user.set_password(form.password.data)
+            db.session.commit()
+            flash('Senha alterada com sucesso.', 'success')
+            return redirect(url_for('.index'))
+    return render_template('change_password.html', form=form)
 
-    username = user.username
-    db.session.delete(user)
-    db.session.commit()
-    flash(f'Usuário "{username}" excluído com sucesso.', 'success')
-    return redirect(url_for('.index'))
+
+@main.route('/alterar-email', methods=['GET', 'POST'])
+@login_required
+def change_email():
+    form = ChangeEmailForm()
+    if form.validate_on_submit():
+        email = form.email.data.strip().lower()
+        if not current_user.check_password(form.password.data):
+            flash('A senha atual está incorreta.', 'danger')
+        elif User.query.filter(func.lower(User.email) == email, User.id != current_user.id).first():
+            flash('Este e-mail já está em uso.', 'warning')
+        else:
+            current_user.email = email
+            current_user.confirmed = False
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                flash('Este e-mail já está em uso.', 'warning')
+            else:
+                message = Markup('E-mail alterado! <a href="{}">Clique aqui</a> para confirmar o novo endereço.').format(
+                    url_for('.confirm_email', token=current_user.generate_confirmation_token()))
+                flash(message, 'warning')
+                return redirect(url_for('.index'))
+    return render_template('change_email.html', form=form)
+
+
+@main.route('/recuperar-senha', methods=['GET', 'POST'])
+def request_password_reset():
+    if current_user.is_authenticated:
+        return redirect(url_for('.index'))
+    form = RequestResetForm()
+    if form.validate_on_submit():
+        user = User.query.filter(func.lower(User.email) == form.email.data.strip().lower()).first()
+        if user:
+            try:
+                send_password_reset_email(user)
+            except Exception:
+                current_app.logger.exception('Falha ao enviar link de recuperação de senha.')
+                flash('Não foi possível enviar o e-mail agora. Tente novamente mais tarde.', 'danger')
+                return render_template('request_reset.html', form=form)
+        flash('Se o endereço estiver cadastrado, você receberá um link para redefinir sua senha.', 'info')
+        return redirect(url_for('.login'))
+    return render_template('request_reset.html', form=form)
+
+
+@main.route('/redefinir-senha/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    if current_user.is_authenticated:
+        return redirect(url_for('.index'))
+    form = ResetPasswordForm()
+    if form.validate_on_submit():
+        user = User.reset_password(token, form.password.data)
+        if user is None:
+            flash('O link de recuperação é inválido ou expirou.', 'danger')
+            return redirect(url_for('.request_password_reset'))
+        flash('Sua senha foi redefinida. Faça login com a nova senha.', 'success')
+        return redirect(url_for('.login'))
+    return render_template('reset_password.html', form=form)

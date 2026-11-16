@@ -24,6 +24,8 @@ class Config:
     API_KEY = os.environ.get('API_KEY')
     API_URL = os.environ.get('API_URL')
     API_FROM = os.environ.get('API_FROM')
+    PASSWORD_RESET_MAX_AGE = 3600
+    EMAIL_CONFIRM_MAX_AGE = 86400
 
     @staticmethod
     def init_app(app):
